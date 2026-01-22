@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>男友相机 Pro Max</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; }
+        #camera-container { position: relative; width: 100vw; height: 100vh; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 姿势轮廓参考层 - 仅在取景时可见 */
+        #pose-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; 
+            opacity: 0.6;
+            pointer-events: none;
+            filter: drop-shadow(0 0 8px rgba(255,255,255,0.5));
+        }
+
+        /* 顶部导航：场景选择 */
+        .scene-bar {
+            position: absolute;
+            top: 40px; left: 0; width: 100%;
+            display: flex; justify-content: center; gap: 15px;
+            z-index: 10;
+        }
+        .scene-btn { color: rgba(255,255,255,0.6); font-size: 14px; padding: 5px 10px; border-radius: 20px; }
+        .scene-btn.active { color: #fff; background: rgba(255,255,255,0.2); font-weight: bold; }
+
+        /* 底部控制区 */
+        .controls { 
+            position: absolute; bottom: 50px; width: 100%; 
+            display: flex; justify-content: space-around; align-items: center;
+        }
+        .shutter-btn { 
+            width: 70px; height: 70px; background: white; border-radius: 50%; 
+            border: 5px solid rgba(255,255,255,0.3);
+        }
+        .icon-btn { color: white; background: rgba(0,0,0,0.4); padding: 10px; border-radius: 50%; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;}
+
+        /* 结果预览 */
+        #result-container { 
+            display: none; position: fixed; inset: 0; background: #000; z-index: 100; 
+            flex-direction: column; align-items: center; justify-content: center; 
+        }
+        #result-img { max-width: 100%; max-height: 80%; }
+    </style>
+</head>
+<body>
+
+<div id="camera-container">
+    <div class="scene-bar">
+        <div class="scene-btn active" onclick="switchScene('street', this)">街拍</div>
+        <div class="scene-btn" onclick="switchScene('cafe', this)">咖啡馆</div>
+        <div class="scene-btn" onclick="switchScene('beach', this)">海边</div>
+        <div class="scene-btn" onclick="switchScene('park', this)">公园</div>
+    </div>
+
+    <video id="video" autoplay playsinline></video>
+    
+    <!-- 动态轮廓图 -->
+    <img id="pose-overlay" src="" alt="姿势参考">
+
+    <div class="controls">
+        <!-- 切换镜头 -->
+        <button class="icon-btn" onclick="toggleCamera()">🔄</button>
+        <!-- 拍照 -->
+        <button class="shutter-btn" onclick="takePhoto()"></button>
+        <!-- 切换姿势 -->
+        <button class="icon-btn" onclick="nextPose()">▶️</button>
+    </div>
+</div>
+
+<div id="result-container">
+    <p class="text-white mb-4">✨ 预览 (长按保存纯净照片)</p>
+    <img id="result-img" src="">
+    <button onclick="closePreview()" class="mt-6 bg-white text-black px-8 py-3 rounded-full font-bold">返回拍摄</button>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('pose-overlay');
+    const resultContainer = document.getElementById('result-container');
+    const resultImg = document.getElementById('result-img');
+    const canvas = document.getElementById('canvas');
+
+    // 姿势库 (Base64 或 稳定的 SVG)
+    const poseLibrary = {
+        street: [
+            "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIj48cGF0aCBkPSJNMTIgNWEyIDIgMCAxIDAgMC00IDIgMiAwIDAgMCAwIDR6TTEyIDV2OG0wIDBsLTMgNG0zLTQgMyA0bS0zLThoLTRtNCAwaDQiLz48L3N2Zz4=", // 站姿1
+            "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIj48cGF0aCBkPSJNMTIgN2EyIDIgMCAxIDAgMC00IDIgMiAwIDAgMCAwIDR6TTEwIDhoNHY3bC0yIDNoLTJsLTItM3oiLz48L3N2Zz4=" // 站姿2
+        ],
+        cafe: [
+            "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIj48cGF0aCBkPSJNOCA4aDh2NWgtOHpNOSAxN2g2djNoLTZ6TTUgNnYxNGgxNFY2SDV6Ii8+PC9zdmc+", // 坐姿1
+        ],
+        beach: ["data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIj48cGF0aCBkPSJNMTIgN2EyIDIgMCAxIDAgMC00IDIgMiAwIDAgMCAwIDR6TTEyIDE4bC00LTRtNC00djRtNCAwaC04bC00LTRtMTYgOGgtMTYiLz48L3N2Zz4="],
+        park: ["data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIj48cGF0aCBkPSJNMTIgN2EyIDIgMCAxIDAgMC00IDIgMiAwIDAgMCAwIDR6TTEyIDE4bC00LTRtNC00djRtNCAwaC04bC00LTRtMTYgOGgtMTYiLz48L3N2Zz4="]
+    };
+
+    let currentScene = 'street';
+    let poseIndex = 0;
+    let useFacingMode = "environment"; // 默认后置
+
+    // 启动摄像头
+    async function initCamera() {
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: useFacingMode }, 
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            alert("请确保使用 HTTPS 并授予摄像头权限");
+        }
+    }
+
+    // 切换前后摄像头
+    function toggleCamera() {
+        useFacingMode = (useFacingMode === "environment") ? "user" : "environment";
+        initCamera();
+    }
+
+    // 切换场景
+    function switchScene(scene, el) {
+        currentScene = scene;
+        poseIndex = 0;
+        document.querySelectorAll('.scene-btn').forEach(btn => btn.classList.remove('active'));
+        el.classList.add('active');
+        updatePose();
+    }
+
+    // 下一个姿势
+    function nextPose() {
+        poseIndex = (poseIndex + 1) % poseLibrary[currentScene].length;
+        updatePose();
+    }
+
+    function updatePose() {
+        overlay.src = poseLibrary[currentScene][poseIndex];
+    }
+
+    // 核心：拍照（只拍视频，不拍轮廓线）
+    function takePhoto() {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        
+        // 如果是前置摄像头，需要水平翻转照片
+        if (useFacingMode === "user") {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+        }
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        resultImg.src = canvas.toDataURL('image/jpeg', 0.9);
+        resultContainer.style.display = 'flex';
+    }
+
+    function closePreview() {
+        resultContainer.style.display = 'none';
+    }
+
+    window.onload = () => {
+        initCamera();
+        updatePose();
+    };
+</script>
+</body>
+</html>
