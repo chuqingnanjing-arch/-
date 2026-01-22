@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 摄影助手 Pro</title>
+    <!-- 引入 ml5.js -->
+    <script src="https://cdn.jsdelivr.net/npm/ml5@0.12.2/dist/ml5.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; color: white; font-family: sans-serif; }
+        #camera-container { position: relative; width: 100vw; height: 100vh; background: #111; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 姿势参考图 */
+        #pose-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            opacity: 0.8;
+            pointer-events: none;
+            transition: opacity 0.5s;
+            display: none; /* 初始隐藏 */
+        }
+
+        /* 顶部状态栏 */
+        .ai-status {
+            position: absolute; top: 40px; left: 20px; right: 20px;
+            background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(10px);
+            padding: 10px 15px; border-radius: 12px;
+            font-size: 13px; z-index: 100; border: 1px solid rgba(255,255,255,0.1);
+        }
+        .loading-dots:after { content: '...'; animation: dots 1.5s steps(5, end) infinite; }
+        @keyframes dots { 0%, 20% { color: rgba(0,0,0,0); text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 40% { color: white; text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 60% { text-shadow: .25em 0 0 white, .5em 0 0 rgba(0,0,0,0); } 80%, 100% { text-shadow: .25em 0 0 white, .5em 0 0 white; } }
+
+        .controls { position: absolute; bottom: 50px; width: 100%; display: flex; justify-content: space-around; align-items: center; }
+        .shutter-btn { width: 72px; height: 72px; background: white; border-radius: 50%; border: 4px solid rgba(255,255,255,0.3); }
+        .shutter-btn:active { transform: scale(0.9); background: #ccc; }
+    </style>
+</head>
+<body>
+
+<div id="camera-container">
+    <div class="ai-status">
+        <div id="ai-loading" class="flex items-center gap-2">
+            <span class="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>
+            <span id="status-text">正在加载 AI 视觉大脑<span class="loading-dots"></span></span>
+        </div>
+        <div id="ai-ready" class="hidden flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                <span>智能建议: <b id="scene-label" class="text-pink-400">正在思考</b></span>
+            </div>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline muted></video>
+    <img id="pose-overlay" src="" alt="">
+
+    <div class="controls">
+        <button onclick="toggleCamera()" class="bg-black/40 p-4 rounded-full text-xl">🔄</button>
+        <button class="shutter-btn" onclick="takePhoto()"></button>
+        <button onclick="manualNext()" class="bg-black/40 p-4 rounded-full text-xl">🖼️</button>
+    </div>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const video = document.getElementById('video');
+    const label = document.getElementById('scene-label');
+    const overlay = document.getElementById('pose-overlay');
+    const statusText = document.getElementById('status-text');
+    let classifier;
+    let currentFacingMode = "environment";
+    let isModelReady = false;
+
+    // 1. 初始化摄像头
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: currentFacingMode }, 
+                audio: false 
+            });
+            video.srcObject = stream;
+            // 确保视频开始播放后再加载 AI
+            video.onloadedmetadata = () => {
+                video.play();
+                loadAIModel();
+            };
+        } catch (err) {
+            alert("请确保在 Safari 设置中允许摄像头访问，并使用 HTTPS 访问。");
+        }
+    }
+
+    // 2. 加载 AI 模型
+    function loadAIModel() {
+        statusText.innerText = "正在下载 AI 识别模型 (约15MB)";
+        classifier = ml5.imageClassifier('MobileNet', video, () => {
+            isModelReady = true;
+            document.getElementById('ai-loading').classList.add('hidden');
+            document.getElementById('ai-ready').classList.remove('hidden');
+            classifyImage();
+        });
+    }
+
+    // 3. 实时 AI 环境识别
+    function classifyImage() {
+        if (!isModelReady) return;
+        classifier.classify((err, results) => {
+            if (err) {
+                console.error(err);
+                return;
+            }
+            if (results && results.length > 0) {
+                const topResult = results[0].label.toLowerCase();
+                analyzeScene(topResult);
+            }
+            setTimeout(classifyImage, 1500); // 降低频率防止手机过热
+        });
+    }
+
+    // 4. AI 决策逻辑：根据识别出的物体切换姿势
+    function analyzeScene(info) {
+        label.innerText = info.split(',')[0].toUpperCase();
+        
+        // 自动识别场景并切换本地图片
+        if (info.includes('water') || info.includes('beach') || info.includes('ocean')) {
+            switchPose('beach.png');
+        } else if (info.includes('coffee') || info.includes('cup') || info.includes('table') || info.includes('restaurant')) {
+            switchPose('cafe.png');
+        } else if (info.includes('tree') || info.includes('grass') || info.includes('park')) {
+            switchPose('park.png');
+        } else {
+            switchPose('street.png'); // 默认为街拍
+        }
+    }
+
+    function switchPose(fileName) {
+        // 只有当图片地址改变时才更新，避免闪烁
+        if (!overlay.src.includes(fileName)) {
+            overlay.src = fileName;
+            overlay.style.display = 'block';
+            overlay.style.opacity = 0;
+            setTimeout(() => overlay.style.opacity = 0.8, 50);
+        }
+    }
+
+    function toggleCamera() {
+        currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
+        initCamera();
+    }
+
+    function takePhoto() {
+        const canvas = document.getElementById('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (currentFacingMode === "user") {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0);
+        const data = canvas.toDataURL('image/jpeg');
+        const win = window.open();
+        win.document.write('<div style="text-align:center"><img src="' + data + '" style="width:100%; border-radius:20px;"><h1 style="font-family:sans-serif">长按保存纯净大片</h1><button onclick="window.close()" style="padding:15px 30px; border-radius:30px; border:none; background:#000; color:#fff; font-size:18px;">返回重拍</button></div>');
+    }
+
+    function manualNext() {
+        // 预留的手动切换逻辑
+        const poses = ['street.png', 'cafe.png', 'beach.png', 'park.png'];
+        let current = overlay.src.split('/').pop();
+        let idx = poses.indexOf(current);
+        switchPose(poses[(idx + 1) % poses.length]);
+    }
+
+    window.onload = initCamera;
+</script>
+</body>
+</html>
