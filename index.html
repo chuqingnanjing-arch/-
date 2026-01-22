@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>男友相机Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; font-family: sans-serif; }
+        #camera-container { position: relative; width: 100vw; height: 100vh; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 姿势轮廓叠加层 */
+        #pose-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70%; 
+            opacity: 0.7;
+            pointer-events: none;
+            transition: all 0.3s;
+        }
+
+        /* 顶部状态栏 */
+        .top-bar { position: absolute; top: 0; width: 100%; padding: 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent); color: white; text-align: center; }
+
+        /* 底部控制区 */
+        .controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-around; align-items: center; }
+        .shutter-btn { width: 75px; height: 75px; background: white; border-radius: 50%; border: 4px solid rgba(255,255,255,0.3); outline: none; }
+        .shutter-btn:active { transform: scale(0.9); background: #ddd; }
+        
+        /* 预览/保存图片层 */
+        #result-container { display: none; position: fixed; inset: 0; background: #000; z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
+        #result-img { max-width: 90%; max-height: 80%; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="camera-container">
+    <video id="video" autoplay playsinline></video>
+    
+    <!-- 这是一个内置的白色线条人像轮廓 (Base64格式，确保不会加载失败) -->
+    <img id="pose-overlay" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xMiA3YTIgMiAwIDEgMCAwLTQgMiAyIDAgMCAwIDAgNHoiLz48cGF0aCBkPSJNNiAyMWMwLTIgMi0zIDYtM3M2IDEgNiAzTTEyIDd2MTEiLz48L3N2Zz4=">
+
+    <div class="top-bar">
+        <p id="pose-tip">请让女友站入白色轮廓中</p>
+    </div>
+
+    <div class="controls">
+        <button onclick="changeScale(0.9)" class="text-white bg-white/20 px-3 py-1 rounded">缩小</button>
+        <button class="shutter-btn" onclick="takePhoto()"></button>
+        <button onclick="changeScale(1.1)" class="text-white bg-white/20 px-3 py-1 rounded">放大</button>
+    </div>
+</div>
+
+<!-- 拍照后的结果预览 -->
+<div id="result-container">
+    <p class="text-white mb-4">长按图片保存到相册</p>
+    <img id="result-img" src="">
+    <button onclick="closePreview()" class="mt-6 bg-white text-black px-6 py-2 rounded-full font-bold">返回重拍</button>
+</div>
+
+<!-- 隐藏的画布，用于合成照片 -->
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const overlay = document.getElementById('pose-overlay');
+    let currentScale = 1.0;
+
+    // 1. 启动摄像头
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment", width: 1080 }, 
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            alert("请在设置中允许浏览器访问摄像头，并确保使用 HTTPS 访问。");
+        }
+    }
+
+    // 2. 调整轮廓大小
+    function changeScale(factor) {
+        currentScale *= factor;
+        overlay.style.width = (70 * currentScale) + "%";
+    }
+
+    // 3. 核心功能：拍照并合成
+    function takePhoto() {
+        const ctx = canvas.getContext('2d');
+        // 设置画布大小与视频一致
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // A. 画相机背景
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // B. 画轮廓 (计算轮廓在视频中的实际位置)
+        const overlayWidth = canvas.width * (parseFloat(overlay.style.width || 70) / 100);
+        const overlayHeight = (overlay.naturalHeight / overlay.naturalWidth) * overlayWidth;
+        const x = (canvas.width - overlayWidth) / 2;
+        const y = (canvas.height - overlayHeight) / 2;
+        
+        ctx.globalAlpha = 0.6; // 设置轮廓透明度
+        ctx.drawImage(overlay, x, y, overlayWidth, overlayHeight);
+
+        // C. 显示结果
+        document.getElementById('result-img').src = canvas.toDataURL('image/jpeg');
+        document.getElementById('result-container').style.display = 'flex';
+    }
+
+    function closePreview() {
+        document.getElementById('result-container').style.display = 'none';
+    }
+
+    window.onload = startCamera;
+</script>
+</body>
+</html>
