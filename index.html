@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 摄影助手 - 最终修复版</title>
+    <script src="https://cdn.jsdelivr.net/npm/ml5@0.12.2/dist/ml5.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #000; margin: 0; overflow: hidden; color: white; font-family: sans-serif; }
+        #camera-container { position: relative; width: 100vw; height: 100vh; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 参考图层 */
+        #pose-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            opacity: 0.8;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .ai-status {
+            position: absolute; top: 40px; left: 20px; right: 20px;
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px);
+            padding: 12px; border-radius: 15px; font-size: 12px; z-index: 100;
+        }
+
+        .controls { position: absolute; bottom: 50px; width: 100%; display: flex; justify-content: space-around; align-items: center; z-index: 100; }
+        .shutter-btn { width: 75px; height: 75px; background: white; border-radius: 50%; border: 5px solid rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+
+<div id="camera-container">
+    <div class="ai-status">
+        <div id="loading-info" class="flex items-center gap-2 text-yellow-400">
+            <span class="animate-spin">🌀</span> 正在下载AI大脑... (若久无反应请刷新)
+        </div>
+        <div id="ready-info" class="hidden text-green-400">
+            ✅ AI 已就绪 | 识别环境: <span id="scene-label" class="text-white font-bold">思考中</span>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline muted></video>
+    
+    <!-- 设置一个默认的 Base64 图片，确保一开始就有东西 -->
+    <img id="pose-overlay" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIwLjUiPjxwYXRoIGQ9Ik0xMiAxMWMzLjMzIDAgNiAxLjY3IDYgNXYySDEydi03ek0xMiA3YTIgMiAwIDEgMCAwLTQgMiAyIDAgMCAwIDAgNHoiLz48cGF0aCBkPSJNOSAyMWg2TTEyIDd2MTRtLTQtNGg4Ii8+PC9zdmc+" />
+
+    <div class="controls">
+        <button onclick="toggleCamera()" class="bg-white/20 p-4 rounded-full">🔄</button>
+        <button class="shutter-btn" onclick="takePhoto()"></button>
+        <button onclick="manualChange()" class="bg-white/20 p-4 rounded-full">📷</button>
+    </div>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const video = document.getElementById('video');
+    const label = document.getElementById('scene-label');
+    const overlay = document.getElementById('pose-overlay');
+    let classifier;
+    let currentFacingMode = "environment";
+
+    // 1. 初始化
+    async function init() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: currentFacingMode }, audio: false 
+            });
+            video.srcObject = stream;
+            
+            // 加载 AI
+            classifier = ml5.imageClassifier('MobileNet', video, () => {
+                document.getElementById('loading-info').classList.add('hidden');
+                document.getElementById('ready-info').classList.remove('hidden');
+                classify();
+            });
+        } catch (e) {
+            alert("摄像头启动失败，请检查是否是HTTPS环境或权限已开启");
+        }
+    }
+
+    // 2. AI 识别
+    function classify() {
+        classifier.classify((err, results) => {
+            if (results && results.length > 0) {
+                const res = results[0].label.toLowerCase();
+                label.innerText = res.split(',')[0].toUpperCase();
+                autoSwitch(res);
+            }
+            setTimeout(classify, 2000);
+        });
+    }
+
+    // 3. 切换逻辑
+    function autoSwitch(info) {
+        let target = "street.png";
+        if (info.includes('water') || info.includes('beach')) target = "beach.png";
+        if (info.includes('coffee') || info.includes('cup')) target = "cafe.png";
+        if (info.includes('tree') || info.includes('grass')) target = "park.png";
+        
+        setPose(target);
+    }
+
+    function setPose(src) {
+        // 尝试加载新图
+        const tempImg = new Image();
+        tempImg.src = src;
+        tempImg.onload = () => {
+            overlay.src = src;
+            overlay.style.display = 'block';
+        };
+        tempImg.onerror = () => {
+            console.log("图片 " + src + " 未找到，保持当前参考图");
+        };
+    }
+
+    function toggleCamera() {
+        currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
+        init();
+    }
+
+    function takePhoto() {
+        const canvas = document.getElementById('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (currentFacingMode === "user") {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0);
+        const imgData = canvas.toDataURL('image/jpeg');
+        const win = window.open();
+        win.document.write('<body style="margin:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;"><img src="' + imgData + '" style="width:100%;"><h2 style="color:#fff;font-family:sans-serif">长按保存到相册</h2><button onclick="window.close()" style="background:#fff;padding:10px 20px;border-radius:20px;border:none;">返回重拍</button></body>');
+    }
+
+    function manualChange() {
+        // 即使AI没识别对，点击这里也能手动循环切换
+        const poses = ["street.png", "cafe.png", "beach.png", "park.png"];
+        let current = overlay.src.split('/').pop();
+        let nextIdx = (poses.indexOf(current) + 1) % poses.length;
+        setPose(poses[nextIdx]);
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
