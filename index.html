@@ -3,40 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>男友拍照神器</title>
+    <title>男友相机 - 姿势引导</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #camera-container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        /* 这里的姿势图片层 */
+        #pose-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; /* 轮廓大小 */
+            opacity: 0.6; /* 透明度 */
+            pointer-events: none; /* 不挡住点击事件 */
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.8));
+        }
+        .controls { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; justify-content: space-around; align-items: center; padding: 0 20px; }
+        .shutter { width: 70px; height: 70px; background: white; border-radius: 50%; border: 5px solid rgba(0,0,0,0.2); }
+    </style>
 </head>
-<body class="bg-gray-50">
-    <div class="max-w-md mx-auto min-h-screen shadow-lg bg-white">
-        <!-- 头部 -->
-        <header class="bg-gradient-to-r from-rose-400 to-pink-500 p-6 text-white text-center">
-            <h1 class="text-2xl font-bold">📸 男友拍照神器</h1>
-            <p class="text-xs mt-2 opacity-80">从此告别“把你拍丑”</p>
-        </header>
+<body>
 
-        <!-- 内容区 -->
-        <div class="p-4">
-            <div id="pose-container" class="space-y-6">
-                <!-- 姿势卡片 -->
-                <div class="rounded-2xl border bg-white overflow-hidden shadow-sm">
-                    <img src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80" class="w-full h-96 object-cover">
-                    <div class="p-4">
-                        <span class="bg-pink-100 text-pink-600 px-3 py-1 rounded-full text-xs font-semibold">街拍 / 站姿</span>
-                        <h3 class="text-lg font-bold mt-2">交叉腿显长法</h3>
-                        <p class="text-gray-500 text-sm mt-1 leading-relaxed">💡 技巧：手机拿低，镜头稍微上仰。让女友一只脚迈向镜头，脚底贴近画面边缘。</p>
-                    </div>
-                </div>
+<div id="camera-container">
+    <!-- 1. 摄像头视频流 -->
+    <video id="video" autoplay playsinline></video>
 
-                <div class="rounded-2xl border bg-white overflow-hidden shadow-sm">
-                    <img src="https://images.unsplash.com/photo-1516483638261-f4dbaf036963?auto=format&fit=crop&w=800&q=80" class="w-full h-96 object-cover">
-                    <div class="p-4">
-                        <span class="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-xs font-semibold">海边 / 背影</span>
-                        <h3 class="text-lg font-bold mt-2">奔向大海的自然感</h3>
-                        <p class="text-gray-500 text-sm mt-1 leading-relaxed">💡 技巧：开启连拍！让女友小跑起来，抓住裙摆飞扬的瞬间。画面留白40%。</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <!-- 2. 姿势轮廓叠加层 (这里换成不同的SVG或PNG) -->
+    <img id="pose-overlay" src="https://svgshare.com/i/15mX.svg" alt="姿势轮廓">
+
+    <!-- 3. UI 控制区 -->
+    <div class="controls">
+        <button onclick="prevPose()" class="bg-black/50 text-white p-3 rounded-full">上一个</button>
+        <div class="shutter" onclick="takePhoto()"></div>
+        <button onclick="nextPose()" class="bg-black/50 text-white p-3 rounded-full">下一个</button>
     </div>
+    
+    <!-- 提示文案 -->
+    <div id="tip" class="absolute top-10 left-0 right-0 text-center text-white text-sm bg-black/30 py-2">
+        请让女生对准白色轮廓
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const poseImg = document.getElementById('pose-overlay');
+    const tip = document.getElementById('tip');
+
+    // 这里定义不同的姿势轮廓图 (建议使用透明背景的PNG或白色线条SVG)
+    const poses = [
+        { name: "全身-街拍", url: "https://svgshare.com/i/15mX.svg", tip: "侧身站立，一只脚向前伸" },
+        { name: "坐姿-咖啡厅", url: "https://svgshare.com/i/15mY.svg", tip: "双手托腮，身体微微前倾" },
+        { name: "半身-回眸", url: "https://svgshare.com/i/15mZ.svg", tip: "背对镜头，侧头微笑" }
+    ];
+    let currentPose = 0;
+
+    // 启动摄像头
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" }, // 强制使用后置摄像头
+                audio: false 
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            alert("无法打开摄像头，请确保授予了权限并使用HTTPS访问");
+        }
+    }
+
+    function nextPose() {
+        currentPose = (currentPose + 1) % poses.length;
+        updateUI();
+    }
+
+    function prevPose() {
+        currentPose = (currentPose - 1 + poses.length) % poses.length;
+        updateUI();
+    }
+
+    function updateUI() {
+        poseImg.src = poses[currentPose].url;
+        tip.innerText = poses[currentPose].tip;
+    }
+
+    function takePhoto() {
+        // 这里可以扩展成真正的拍照保存逻辑
+        alert("咔嚓！(提示：Web版由于权限限制，建议直接按手机电源键+音量键截图，效果最快！)");
+    }
+
+    window.onload = startCamera;
+</script>
+
 </body>
 </html>
